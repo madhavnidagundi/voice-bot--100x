@@ -1,0 +1,2 @@
+/* System fonts keep the app self-contained; no third-party font requests. */
+:root { --font: "Segoe UI", Arial, Helvetica, sans-serif; --display: "Segoe UI", Arial, Helvetica, sans-serif; }
