@@ -31,6 +31,7 @@ export const speakSchema = z
   .object({
     text: z.string().min(1).max(2400),
     token: z.string().min(10).max(256),
+    part: z.number().int().min(0).max(5).optional(),
   })
   .strict();
 export type ChatMessage = z.infer<typeof messageSchema>;

@@ -184,3 +184,30 @@ test("leaving the tab releases hands-free capture", async ({ page }) => {
     ),
   ).toBe(true);
 });
+
+
+test("starts the first audio part before the next is ready and reuses cached playback", async ({ page }) => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/introduction", r => r.fulfill({ json: {
+    ...reply,
+    answer: "I worked with a team at Magna International building middleware for deploying AI models across different edge hardware platforms. I learned about testing and collaboration.",
+  } }));
+  await page.route("**/api/speak", async r => {
+    calls++;
+    if (r.request().postDataJSON().part === 1) await gate;
+    await r.fulfill({ contentType: "audio/wav", body: audio });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Hear my 1-minute introduction" }).click();
+  await expect.poll(() => calls).toBe(2);
+  await expect(page.getByRole("button", { name: "Interrupt & ask" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop audio", exact: true }).click();
+  release();
+  await page.getByRole("button", { name: "Play this answer" }).click();
+  await expect(page.getByRole("button", { name: "Interrupt & ask" })).toBeVisible();
+  // Only the cancelled second part needs another request; the first is cached.
+  await expect.poll(() => calls).toBe(3);
+  await page.getByRole("button", { name: "Start a new conversation" }).click();
+});

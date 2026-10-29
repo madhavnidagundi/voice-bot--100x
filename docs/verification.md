@@ -46,6 +46,10 @@ The model responds using Madhav's supplied notes. Missing information handling w
 
 ## Deployment acceptance still required
 
+### Speech latency follow-up
+
+Sentence-group playback replaces waiting for the full speech file in the browser. A local live-provider comparison on 29 October measured 9,624 ms to download the full introduction versus 1,173 ms for its first group. This single sequential comparison includes network/provider variability and is not a production latency guarantee. Replay uses a bounded in-tab audio cache. Tests cover reconstruction of the complete text, signed full-answer authorization for individual groups, early playback while the next group is pending, cache reuse, and interruption. The previous full-answer API remains supported.
+
 No Vercel deployment has been created. After deploying, open the public HTTPS URL without being signed in to Vercel and verify one typed question and one physical microphone/speaker conversation. Safari and device-specific permission prompts require a check on the actual target device.
 
 For shared production rate limits, configure the optional Redis variables. The built-in in-memory limiter is per process and is not a distributed spending guarantee. The configured Redis adapter has deterministic contract tests; a real Redis deployment was not available for this run.

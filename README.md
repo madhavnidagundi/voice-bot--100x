@@ -40,6 +40,7 @@ For an internet-facing deployment with sustained traffic, configure both `UPSTAS
 - Answers start with roughly 25–55 words. **Tell me more** requests more detail; **Give me an example** asks for a supplied personal story while preserving conversation context.
 - Grounded OpenRouter responses with conversational history and relevant follow-up suggestions.
 - Gnani speech playback, replay, stop, and a mute control. Text answers remain usable if speech fails.
+- Speech starts after the first sentence group is synthesized, while the next group is prepared during playback. Up to six groups preserve sentence order; interruptions cancel pending requests. Downloaded audio is cached only in the current tab (up to 24 MB) and cleared when starting a new conversation. This reduces startup delay for longer answers but can introduce pauses between groups if the provider is slow.
 - Keyboard input, screen-reader status updates, clear microphone errors, transcript export, and cancellation of pending work when starting a new conversation.
 - Conversations stay in the current tab's memory; refreshing or closing the tab clears that local history.
 

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { VoiceRecorder } from "@/lib/recorder";
 import { VoiceActivity } from "@/lib/voice-activity";
+import { speechParts } from "@/lib/speech-parts";
 import { encodeWav } from "@/lib/audio";
 import type { AnswerStyle, Turn } from "@/lib/contracts";
 
@@ -54,6 +55,7 @@ export function useInterview(name: string) {
   const request = useRef<AbortController | null>(null);
   const speechRequest = useRef<AbortController | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
+  const speechCache = useRef(new Map<string, Blob>());
   const audioUrl = useRef<string | null>(null);
   const pending = useRef<{ turns: Turn[]; question: string } | null>(null);
   const resumeAfter = useRef(0);
@@ -147,42 +149,75 @@ export function useInterview(name: string) {
     const controller = new AbortController();
     speechRequest.current = controller;
     try {
-      const response = await fetch("/api/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: turn.content, token: turn.token }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw await failure(response);
-      const blob = await response.blob();
-      if (epoch.current !== currentEpoch || controller.signal.aborted) return;
-      const url = URL.createObjectURL(blob);
-      audioUrl.current = url;
-      const audio = new Audio(url);
-      player.current = audio;
-      audio.onended = () => {
-        if (player.current === audio) {
-          stopPlayback();
-          ready();
+      const parts = speechParts(turn.content);
+      const fetchPart = async (part: number) => {
+        const key = turn.content + "::" + part;
+        const cached = speechCache.current.get(key);
+        if (cached) return cached;
+        const response = await fetch("/api/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: turn.content, token: turn.token, part }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw await failure(response);
+        const blob = await response.blob();
+        if (!controller.signal.aborted) {
+          speechCache.current.set(key, blob);
+          let size = [...speechCache.current.values()].reduce((n, b) => n + b.size, 0);
+          while (size > 24_000_000 && speechCache.current.size) {
+            const oldest = speechCache.current.keys().next().value!;
+            size -= speechCache.current.get(oldest)!.size;
+            speechCache.current.delete(oldest);
+          }
         }
+        return blob;
       };
-      audio.onerror = () => {
-        if (player.current === audio) {
-          stopPlayback();
-          releaseMic();
-          setPhase("ready");
-          setError(
-            "Audio couldn't play. Read the answer or tap its speaker button to retry.",
-          );
+      // Prepare one part ahead while the current part plays.
+      const prepare = (part: number) => fetchPart(part).then(
+        blob => ({ blob, error: null }),
+        error => ({ blob: null, error }),
+      );
+      let next = prepare(0);
+      for (let part = 0; part < parts.length; part++) {
+        const result = await next;
+        if (epoch.current !== currentEpoch || controller.signal.aborted) return;
+        if (result.error || !result.blob) throw result.error;
+        if (part + 1 < parts.length) next = prepare(part + 1);
+        const url = URL.createObjectURL(result.blob);
+        audioUrl.current = url;
+        const audio = new Audio(url);
+        player.current = audio;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const finish = (error?: unknown) => {
+              controller.signal.removeEventListener("abort", aborted);
+              audio.onended = null;
+              audio.onerror = null;
+              if (error) reject(error); else resolve();
+            };
+            const aborted = () => finish(new DOMException("Stopped", "AbortError"));
+            controller.signal.addEventListener("abort", aborted, { once: true });
+            audio.onended = () => finish();
+            audio.onerror = () => finish(new Error("Audio couldn't play. Tap the speaker to retry."));
+            audio.play().then(() => {
+              if (controller.signal.aborted || epoch.current !== currentEpoch) return;
+              resumeAfter.current = Date.now() + 300;
+              setPhase("speaking");
+            }, finish);
+          });
+        } finally {
+          audio.pause();
+          audio.src = "";
+          URL.revokeObjectURL(url);
+          if (player.current === audio) player.current = null;
+          if (audioUrl.current === url) audioUrl.current = null;
         }
-      };
-      await audio.play();
-      if (epoch.current !== currentEpoch || controller.signal.aborted) {
-        audio.pause();
-        return;
       }
-      resumeAfter.current = Date.now() + 300;
-      setPhase("speaking");
+      if (epoch.current === currentEpoch && !controller.signal.aborted) {
+        stopPlayback();
+        ready();
+      }
     } catch (err) {
       if (epoch.current !== currentEpoch || controller.signal.aborted) return;
       stopPlayback();
@@ -419,6 +454,7 @@ export function useInterview(name: string) {
   }
   function reset() {
     stopSession();
+    speechCache.current.clear();
     setTurns([]);
     setDraft("");
     setError("");
